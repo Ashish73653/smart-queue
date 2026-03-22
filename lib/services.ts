@@ -1,37 +1,50 @@
-import { createServiceRoleClient } from "./supabase/server";
+import { getFirebaseAdminDb } from "./firebase/admin";
 import type { Service } from "./types";
 import { serviceSchema } from "./validation";
 
 export async function createService(raw: unknown) {
-  const supabase = createServiceRoleClient();
+  const db = getFirebaseAdminDb();
   const payload = serviceSchema.parse(raw);
 
-  const { data, error } = await supabase
-    .from("services")
-    .insert({
-      name: payload.name,
-      price: payload.price,
-      duration_minutes: payload.duration_minutes,
-      is_active: payload.is_active ?? true,
-    })
-    .select("*")
-    .single();
+  const docRef = db.collection("services").doc();
+  const data: Service = {
+    id: docRef.id,
+    name: payload.name,
+    price: payload.price,
+    duration_minutes: payload.duration_minutes,
+    category: payload.category,
+    is_active: payload.is_active ?? true,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
 
-  if (error) throw error;
-  return data as Service;
+  await docRef.set(data);
+  return data;
 }
 
 export async function updateService(id: string, raw: unknown) {
-  const supabase = createServiceRoleClient();
+  const db = getFirebaseAdminDb();
   const payload = serviceSchema.partial().parse(raw);
 
-  const { data, error } = await supabase
-    .from("services")
-    .update(payload)
-    .eq("id", id)
-    .select("*")
-    .single();
+  const docRef = db.collection("services").doc(id);
+  const existing = await docRef.get();
+  if (!existing.exists) {
+    throw new Error("Service not found");
+  }
 
-  if (error) throw error;
-  return data as Service;
+  await docRef.set(
+    {
+      ...payload,
+      updated_at: new Date().toISOString(),
+    },
+    { merge: true },
+  );
+
+  const updated = await docRef.get();
+  const data = updated.data() as Service;
+
+  return {
+    ...data,
+    id,
+  };
 }

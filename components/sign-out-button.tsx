@@ -1,22 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { createBrowserSupabaseClient } from "@/lib/supabase/client";
+import { signOut as firebaseSignOut } from "firebase/auth";
+import { getFirebaseClientAuth, isFirebaseClientConfigured } from "@/lib/firebase/client";
 
 export function SignOutButton() {
   const router = useRouter();
-  const [supabase, setSupabase] = useState<ReturnType<
-    typeof createBrowserSupabaseClient
-  > | null>(null);
-
-  useEffect(() => {
-    setSupabase(createBrowserSupabaseClient());
+  const auth = useMemo(() => {
+    if (!isFirebaseClientConfigured()) return null;
+    return getFirebaseClientAuth();
   }, []);
 
   async function signOut() {
-    if (!supabase) return;
-    await supabase.auth.signOut();
+    await fetch("/api/admin/auth/session", {
+      method: "DELETE",
+    });
+    if (auth) {
+      await firebaseSignOut(auth);
+    }
     router.push("/admin/login");
     router.refresh();
   }

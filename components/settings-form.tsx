@@ -11,7 +11,7 @@ export function SettingsForm({ initialSettings }: Props) {
   const [settings, setSettings] = useState<ShopSettings>(
     initialSettings ?? {
       id: "",
-      shop_name: "Neighborhood Barber",
+      shop_name: "Smart Queue Barbershop",
       contact_number: "",
       opening_time: "09:00",
       closing_time: "21:00",

@@ -30,5 +30,6 @@ export const serviceSchema = z.object({
   name: z.string().min(2),
   price: z.number().nonnegative(),
   duration_minutes: z.number().int().positive(),
+  category: z.enum(["hair", "beard", "grooming", "combo"]).optional(),
   is_active: z.boolean().optional(),
 });

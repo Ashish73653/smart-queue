@@ -5,12 +5,15 @@ export type BookingStatus =
   | "cancelled"
   | "no_show";
 
+export type ServiceCategory = "hair" | "beard" | "grooming" | "combo";
+
 export type Service = {
   id: string;
   name: string;
   price: number;
   duration_minutes: number;
   is_active: boolean;
+  category?: ServiceCategory;
   created_at?: string;
   updated_at?: string;
 };
@@ -40,7 +43,8 @@ export type BookingService = {
   booking_id: string;
   service_id: string;
   quantity: number;
-  service?: Service;
+  service?: Pick<Service, "name" | "price" | "duration_minutes"> &
+    Partial<Pick<Service, "id" | "is_active">>;
 };
 
 export type ShopSettings = {

@@ -2,17 +2,25 @@
 
 import { useState } from "react";
 import { formatDuration } from "@/lib/format";
-import type { Service } from "@/lib/types";
+import type { Service, ServiceCategory } from "@/lib/types";
 
 type Props = {
   initialServices: Service[];
 };
+
+const categoryOptions: Array<{ value: ServiceCategory; label: string }> = [
+  { value: "hair", label: "Hair" },
+  { value: "beard", label: "Beard" },
+  { value: "grooming", label: "Grooming" },
+  { value: "combo", label: "Combo" },
+];
 
 export function ServicesManager({ initialServices }: Props) {
   const [services, setServices] = useState<Service[]>(initialServices);
   const [name, setName] = useState("");
   const [price, setPrice] = useState("0");
   const [duration, setDuration] = useState("10");
+  const [category, setCategory] = useState<ServiceCategory>("grooming");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -48,6 +56,7 @@ export function ServicesManager({ initialServices }: Props) {
           name,
           price: Number(price),
           duration_minutes: Number(duration),
+          category,
         }),
       });
       const json = await res.json();
@@ -56,6 +65,7 @@ export function ServicesManager({ initialServices }: Props) {
       setName("");
       setPrice("0");
       setDuration("10");
+      setCategory("grooming");
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Unable to create service";
@@ -75,7 +85,7 @@ export function ServicesManager({ initialServices }: Props) {
 
       <div className="rounded-3xl bg-white/90 p-5 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100">
         <p className="text-sm font-semibold text-slate-900">Add service</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-4">
+        <div className="mt-3 grid gap-3 sm:grid-cols-5">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -96,6 +106,17 @@ export function ServicesManager({ initialServices }: Props) {
             placeholder="Minutes"
             className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-400"
           />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value as ServiceCategory)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-400"
+          >
+            {categoryOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <button
             type="button"
             disabled={loading}
@@ -115,7 +136,7 @@ export function ServicesManager({ initialServices }: Props) {
           {services.map((service) => (
             <div
               key={service.id}
-              className="grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm sm:grid-cols-5 sm:items-center"
+              className="grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 p-4 shadow-sm sm:grid-cols-6 sm:items-center"
             >
               <div className="sm:col-span-2">
                 <p className="text-sm font-semibold text-slate-900">
@@ -150,6 +171,24 @@ export function ServicesManager({ initialServices }: Props) {
                   }
                   className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-400"
                 />
+              </label>
+              <label className="text-xs text-slate-600">
+                Tag
+                <select
+                  value={service.category ?? "grooming"}
+                  onChange={(e) =>
+                    updateService(service.id, {
+                      category: e.target.value,
+                    })
+                  }
+                  className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none focus:border-slate-400"
+                >
+                  {categoryOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <div className="flex items-center gap-2">
                 <input

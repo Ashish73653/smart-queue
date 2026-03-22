@@ -1,11 +1,11 @@
-import { createServiceRoleClient, isServiceRoleConfigured } from "./supabase/server";
+import { getFirebaseAdminDb, isFirebaseAdminConfigured } from "./firebase/admin";
 import type { ShopSettings } from "./types";
 
 export async function getShopSettings() {
-  if (!isServiceRoleConfigured()) {
+  if (!isFirebaseAdminConfigured()) {
     return {
       id: "local",
-      shop_name: "Neighborhood Barber",
+      shop_name: "Smart Queue Barbershop",
       contact_number: "",
       opening_time: "",
       closing_time: "",
@@ -13,36 +13,48 @@ export async function getShopSettings() {
       buffer_minutes: 0,
     };
   }
-  const supabase = createServiceRoleClient();
-  const { data, error } = await supabase
-    .from("shop_settings")
-    .select("*")
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data as ShopSettings | null;
+
+  const db = getFirebaseAdminDb();
+  const snap = await db.collection("shop_settings").doc("primary").get();
+  if (!snap.exists) return null;
+
+  const data = snap.data() as Omit<ShopSettings, "id">;
+  return {
+    id: snap.id,
+    ...data,
+  };
 }
 
 export async function upsertShopSettings(values: Partial<ShopSettings>) {
-  if (!isServiceRoleConfigured()) {
-    throw new Error("Supabase is not configured");
+  if (!isFirebaseAdminConfigured()) {
+    throw new Error("Firebase is not configured");
   }
-  const supabase = createServiceRoleClient();
+
+  const db = getFirebaseAdminDb();
   const existing = await getShopSettings();
 
   const payload = existing
     ? { ...existing, ...values, id: existing.id }
     : {
         ...values,
-        shop_name: values.shop_name ?? "Neighborhood Barber",
+        shop_name: values.shop_name ?? "Smart Queue Barbershop",
         is_open: values.is_open ?? true,
       };
 
-  const { data, error } = await supabase
-    .from("shop_settings")
-    .upsert(payload)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data as ShopSettings;
+  const merged = {
+    shop_name: payload.shop_name,
+    contact_number: payload.contact_number ?? "",
+    opening_time: payload.opening_time ?? "",
+    closing_time: payload.closing_time ?? "",
+    is_open: payload.is_open ?? true,
+    buffer_minutes: payload.buffer_minutes ?? 0,
+    updated_at: new Date().toISOString(),
+  };
+
+  await db.collection("shop_settings").doc("primary").set(merged, { merge: true });
+
+  return {
+    id: "primary",
+    ...merged,
+  };
 }

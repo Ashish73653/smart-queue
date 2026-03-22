@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { fetchQueue, updateBookingServices } from "@/lib/bookings";
-import { createServiceRoleClient } from "@/lib/supabase/server";
+import { getFirebaseAdminDb } from "@/lib/firebase/admin";
 import { etaForBooking } from "@/lib/bookings";
+import type { Booking } from "@/lib/types";
+
+async function findBookingByReference(reference: string) {
+  const db = getFirebaseAdminDb();
+  const snapshot = await db
+    .collection("bookings")
+    .where("booking_reference", "==", reference)
+    .limit(1)
+    .get();
+
+  if (snapshot.empty) return null;
+  const doc = snapshot.docs[0];
+  return { id: doc.id, ...(doc.data() as Omit<Booking, "id">) } as Booking;
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -11,14 +25,8 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const supabase = createServiceRoleClient();
-    const { data: existing, error } = await supabase
-      .from("bookings")
-      .select("*")
-      .eq("booking_reference", reference)
-      .maybeSingle();
-
-    if (error) throw error;
+    const db = getFirebaseAdminDb();
+    const existing = await findBookingByReference(reference);
     if (!existing) {
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
@@ -35,8 +43,10 @@ export async function PATCH(
     }
 
     const updates: Record<string, unknown> = {
-      preferred_time_range: body.preferred_time_range ?? existing.preferred_time_range,
+      preferred_time_range:
+        body.preferred_time_range ?? existing.preferred_time_range,
       note: body.note ?? existing.note,
+      updated_at: new Date().toISOString(),
     };
 
     let updatedBooking = existing;
@@ -55,14 +65,17 @@ export async function PATCH(
       );
     }
 
-    const { data: finalBooking, error: updateError } = await supabase
-      .from("bookings")
-      .update(updates)
-      .eq("id", updatedBooking.id)
-      .select("*")
-      .single();
-
-    if (updateError) throw updateError;
+    await db.collection("bookings").doc(String(updatedBooking.id)).set(updates, {
+      merge: true,
+    });
+    const finalBookingSnapshot = await db
+      .collection("bookings")
+      .doc(String(updatedBooking.id))
+      .get();
+    const finalBooking = {
+      id: finalBookingSnapshot.id,
+      ...(finalBookingSnapshot.data() as Omit<Booking, "id">),
+    } as Booking;
 
     const queue = await fetchQueue(finalBooking.booking_date);
     const eta_minutes = etaForBooking(queue, finalBooking.id);
@@ -97,13 +110,8 @@ export async function DELETE(
   }
 
   try {
-    const supabase = createServiceRoleClient();
-    const { data: existing, error } = await supabase
-      .from("bookings")
-      .select("*")
-      .eq("booking_reference", reference)
-      .maybeSingle();
-    if (error) throw error;
+    const db = getFirebaseAdminDb();
+    const existing = await findBookingByReference(reference);
     if (!existing) {
       return NextResponse.json({ error: "Booking not found" }, { status: 404 });
     }
@@ -112,13 +120,22 @@ export async function DELETE(
       return NextResponse.json({ error: "Phone does not match" }, { status: 403 });
     }
 
-    const { data: cancelled, error: cancelError } = await supabase
-      .from("bookings")
-      .update({ status: "cancelled" })
-      .eq("id", existing.id)
-      .select("*")
-      .single();
-    if (cancelError) throw cancelError;
+    await db.collection("bookings").doc(String(existing.id)).set(
+      {
+        status: "cancelled",
+        updated_at: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+
+    const cancelledSnap = await db
+      .collection("bookings")
+      .doc(String(existing.id))
+      .get();
+    const cancelled = {
+      id: cancelledSnap.id,
+      ...(cancelledSnap.data() as Omit<Booking, "id">),
+    } as Booking;
 
     return NextResponse.json({ booking: cancelled });
   } catch (error) {

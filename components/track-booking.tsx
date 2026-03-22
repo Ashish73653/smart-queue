@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatCurrency, formatDuration } from "@/lib/format";
 import type { Service } from "@/lib/types";
 
@@ -58,6 +58,8 @@ const statusCopy: Record<string, string> = {
 };
 
 export function TrackBooking({ services }: Props) {
+  const lastBookingKey = "smart_queue_last_booking";
+
   const [lookup, setLookup] = useState<BookingLookup>({
     booking_reference: "",
     phone: "",
@@ -69,6 +71,58 @@ export function TrackBooking({ services }: Props) {
   const [note, setNote] = useState("");
   const [preferredTime, setPreferredTime] = useState("");
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
+  const [copiedReference, setCopiedReference] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<
+    NotificationPermission | "unsupported"
+  >("unsupported");
+  const [hasNearTurnAlerted, setHasNearTurnAlerted] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+
+    setNotificationPermission(window.Notification.permission);
+  }, []);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const paramReference =
+      params.get("reference") ?? params.get("booking_reference") ?? "";
+    const paramPhone = params.get("phone") ?? "";
+
+    if (paramReference || paramPhone) {
+      setLookup({
+        booking_reference: paramReference,
+        phone: paramPhone,
+      });
+      return;
+    }
+
+    const saved = window.localStorage.getItem(lastBookingKey);
+    if (!saved) return;
+
+    try {
+      const parsed = JSON.parse(saved) as BookingLookup;
+      if (parsed.booking_reference && parsed.phone) {
+        setLookup(parsed);
+      }
+    } catch {
+      window.localStorage.removeItem(lastBookingKey);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!data) {
+      setHasNearTurnAlerted(false);
+      return;
+    }
+
+    if (data.eta_minutes > 1) {
+      setHasNearTurnAlerted(false);
+    }
+  }, [data]);
 
   const totals = useMemo(() => {
     return selectedServices.reduce(
@@ -83,38 +137,90 @@ export function TrackBooking({ services }: Props) {
     );
   }, [selectedServices, services]);
 
-  async function fetchBooking() {
-    setLoading(true);
-    setError(null);
-    setEditing(false);
-    try {
-      const params = new URLSearchParams({
-        booking_reference: lookup.booking_reference,
-        phone: lookup.phone,
-      }).toString();
-      const res = await fetch(`/api/bookings?${params}`);
-      const json: BookingApiResponse = await res.json();
-      if (!res.ok || !json.booking) {
-        throw new Error(json.error || "Could not find booking");
+  const loadBooking = useCallback(
+    async (options?: { silent?: boolean; keepEditing?: boolean }) => {
+      const silent = options?.silent ?? false;
+      if (!silent) {
+        setLoading(true);
+        setError(null);
       }
-      setData({
-        booking: json.booking,
-        eta_minutes: json.eta_minutes ?? 0,
-        people_ahead: json.people_ahead ?? 0,
-      });
-      setSelectedServices(
-        json.booking.booking_services?.map((s) => s.service_id) ?? [],
-      );
-      setNote(json.booking.note ?? "");
-      setPreferredTime(json.booking.preferred_time_range ?? "");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Something went wrong";
-      setError(message);
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
+      if (!options?.keepEditing) {
+        setEditing(false);
+      }
+
+      try {
+        const params = new URLSearchParams({
+          booking_reference: lookup.booking_reference,
+          phone: lookup.phone,
+        }).toString();
+        const res = await fetch(`/api/bookings?${params}`);
+        const json: BookingApiResponse = await res.json();
+        if (!res.ok || !json.booking) {
+          throw new Error(json.error || "Could not find booking");
+        }
+        setData({
+          booking: json.booking,
+          eta_minutes: json.eta_minutes ?? 0,
+          people_ahead: json.people_ahead ?? 0,
+        });
+        setSelectedServices(
+          json.booking.booking_services?.map((s) => s.service_id) ?? [],
+        );
+        setNote(json.booking.note ?? "");
+        setPreferredTime(json.booking.preferred_time_range ?? "");
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Something went wrong";
+        if (!silent) {
+          setError(message);
+        }
+        setData(null);
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [lookup.booking_reference, lookup.phone],
+  );
+
+  async function fetchBooking() {
+    await loadBooking();
   }
+
+  async function requestNotificationAccess() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotificationPermission("unsupported");
+      return;
+    }
+
+    const permission = await window.Notification.requestPermission();
+    setNotificationPermission(permission);
+  }
+
+  useEffect(() => {
+    if (!lookup.booking_reference || !lookup.phone) return;
+    if (!data?.booking) return;
+    if (!["waiting", "in_progress"].includes(data.booking.status)) return;
+
+    const timer = window.setInterval(() => {
+      void loadBooking({ silent: true, keepEditing: true });
+    }, 30_000);
+
+    return () => window.clearInterval(timer);
+  }, [data?.booking, loadBooking, lookup.booking_reference, lookup.phone]);
+
+  useEffect(() => {
+    if (!data?.booking) return;
+    if (notificationPermission !== "granted") return;
+    if (hasNearTurnAlerted) return;
+    if (!["waiting", "in_progress"].includes(data.booking.status)) return;
+    if (data.eta_minutes > 1) return;
+
+    new Notification("TrimQ update", {
+      body: `Your turn is close. Ref ${data.booking.booking_reference} is about to start.`,
+    });
+    setHasNearTurnAlerted(true);
+  }, [data, hasNearTurnAlerted, notificationPermission]);
 
   async function submitEdit() {
     if (!data?.booking) return;
@@ -184,17 +290,27 @@ export function TrackBooking({ services }: Props) {
     }
   }
 
+  async function copyReference(reference: string) {
+    try {
+      await navigator.clipboard.writeText(reference);
+      setCopiedReference(true);
+      window.setTimeout(() => setCopiedReference(false), 1800);
+    } catch {
+      setCopiedReference(false);
+    }
+  }
+
   const booking = data?.booking;
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
-      <div className="lg:col-span-2 space-y-4 rounded-3xl bg-white/90 p-6 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100">
+      <div className="lg:col-span-2 space-y-4 rounded-3xl p-5 sm:p-6 glass-panel">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
               Track booking
             </p>
-            <h2 className="text-2xl font-semibold text-slate-900">
+            <h2 className="text-2xl font-extrabold text-slate-900">
               Check status or edit
             </h2>
           </div>
@@ -218,21 +334,26 @@ export function TrackBooking({ services }: Props) {
               placeholder="9876543210"
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-600">
-            Booking reference
-            <input
-              required
-              value={lookup.booking_reference}
-              onChange={(e) =>
-                setLookup((prev) => ({
-                  ...prev,
-                  booking_reference: e.target.value,
-                }))
-              }
-              className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400"
-              placeholder="ABC123"
-            />
-          </label>
+          <div className="space-y-1">
+            <label className="flex flex-col gap-1 text-sm text-slate-600">
+              Booking reference
+              <input
+                required
+                value={lookup.booking_reference}
+                onChange={(e) =>
+                  setLookup((prev) => ({
+                    ...prev,
+                    booking_reference: e.target.value,
+                  }))
+                }
+                className="rounded-xl border border-slate-200 px-3 py-2 text-slate-900 shadow-sm outline-none focus:border-slate-400"
+                placeholder="ABC123"
+              />
+            </label>
+            <p className="text-xs text-slate-500">
+              Example: reference is shown right after booking confirmation.
+            </p>
+          </div>
         </div>
 
         <div className="flex gap-3">
@@ -263,6 +384,28 @@ export function TrackBooking({ services }: Props) {
           ) : null}
         </div>
 
+        <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+          <p className="font-semibold text-slate-900">Turn alerts</p>
+          <p className="mt-1 text-slate-600">
+            Free alert mode sends a browser notification when your ETA reaches about 1 minute.
+          </p>
+          {notificationPermission === "granted" ? (
+            <p className="mt-2 font-medium text-emerald-700">Browser alerts enabled.</p>
+          ) : notificationPermission === "unsupported" ? (
+            <p className="mt-2 font-medium text-amber-700">
+              Browser notifications are not supported on this device.
+            </p>
+          ) : (
+            <button
+              type="button"
+              onClick={requestNotificationAccess}
+              className="mt-2 rounded-full border border-slate-300 bg-slate-50 px-3 py-1.5 font-semibold text-slate-800 transition hover:bg-slate-100"
+            >
+              Enable browser alerts
+            </button>
+          )}
+        </div>
+
         {error ? (
           <div className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {error}
@@ -276,9 +419,16 @@ export function TrackBooking({ services }: Props) {
                 <p className="text-sm font-semibold text-slate-900">
                   Queue #{booking.queue_number}
                 </p>
-                <p className="text-xs text-slate-600">
-                  Reference {booking.booking_reference}
-                </p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                  <span>Reference {booking.booking_reference}</span>
+                  <button
+                    type="button"
+                    onClick={() => copyReference(booking.booking_reference)}
+                    className="rounded-full bg-white px-2 py-1 font-semibold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100"
+                  >
+                    {copiedReference ? "Copied" : "Copy"}
+                  </button>
+                </div>
               </div>
               <div className="rounded-full bg-slate-900 px-4 py-1 text-xs font-semibold text-white">
                 ETA ~ {data?.eta_minutes ?? 0} minutes · Ahead:{" "}
@@ -325,9 +475,12 @@ export function TrackBooking({ services }: Props) {
             </div>
           </div>
         ) : (
-          <p className="text-sm text-slate-600">
-            Enter your phone and reference to see status, ETA, and edit options.
-          </p>
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-600">
+            <p className="font-semibold text-slate-900">No booking loaded yet</p>
+            <p className="mt-1">
+              Enter your phone and booking reference to view status, ETA, and edit options.
+            </p>
+          </div>
         )}
 
         {isEditing && booking ? (
@@ -409,17 +562,28 @@ export function TrackBooking({ services }: Props) {
           </div>
         ) : null}
       </div>
-      <aside className="space-y-3 rounded-3xl bg-white/90 p-6 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100">
-        <h3 className="text-lg font-semibold text-slate-900">Why track?</h3>
-        <ul className="space-y-2 text-sm text-slate-700">
-          <li>• See live ETA and how many people are ahead.</li>
-          <li>• Edit services without calling the shop.</li>
-          <li>• Cancel if plans change so the queue stays clean.</li>
-        </ul>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-sm text-slate-700">
-          Keep your reference ID handy. It&apos;s shown after booking and sent
-          by the barber on request.
+      <aside className="space-y-3 rounded-3xl p-5 sm:p-6 glass-panel">
+        <h3 className="text-lg font-bold text-slate-900">Tracking helps you plan better</h3>
+        <div className="space-y-2 text-sm text-slate-700">
+          <p className="rounded-xl border border-slate-100 bg-white/70 px-3 py-2">
+            See live ETA and people ahead before you leave home.
+          </p>
+          <p className="rounded-xl border border-slate-100 bg-white/70 px-3 py-2">
+            Update services if your turn has not started yet.
+          </p>
+          <p className="rounded-xl border border-slate-100 bg-white/70 px-3 py-2">
+            Cancel quickly so queue stays accurate for everyone.
+          </p>
         </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4 text-sm text-slate-700">
+          Keep your booking reference handy. It appears after booking and can be shared by the barber if needed.
+        </div>
+        {(lookup.booking_reference || lookup.phone) && !booking ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            Prefilled from your latest booking. Tap Check booking to load live
+            status.
+          </div>
+        ) : null}
       </aside>
     </div>
   );

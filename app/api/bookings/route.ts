@@ -5,7 +5,21 @@ import {
   fetchQueue,
   trackBooking,
 } from "@/lib/bookings";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { Booking } from "@/lib/types";
+
+const BOOKING_WINDOW_MS = 15 * 60 * 1000;
+const BOOKING_MAX_PER_WINDOW = 6;
+const MIN_FORM_FILL_MS = 3_000;
+
+function getClientIp(request: Request) {
+  const forwarded = request.headers.get("x-forwarded-for");
+  if (forwarded) {
+    return forwarded.split(",")[0]?.trim() || "unknown";
+  }
+
+  return request.headers.get("x-real-ip") || "unknown";
+}
 
 function peopleAhead(bookings: Booking[], queueNumber: number) {
   return bookings.filter(
@@ -17,9 +31,43 @@ function peopleAhead(bookings: Booking[], queueNumber: number) {
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
+    const clientIp = getClientIp(request);
+    const limit = checkRateLimit(
+      `bookings:${clientIp}`,
+      BOOKING_MAX_PER_WINDOW,
+      BOOKING_WINDOW_MS,
+    );
+
+    if (!limit.allowed) {
+      return NextResponse.json(
+        { error: "Too many booking attempts. Please try again in a few minutes." },
+        { status: 429 },
+      );
+    }
+
+    const body = (await request.json()) as {
+      website?: string;
+      form_started_at?: number;
+      booking_date?: string;
+    };
+
+    if (typeof body.website === "string" && body.website.trim().length > 0) {
+      return NextResponse.json(
+        { error: "Unable to create booking. Please try again." },
+        { status: 400 },
+      );
+    }
+
+    const formStartedAt = Number(body.form_started_at ?? 0);
+    if (!Number.isFinite(formStartedAt) || Date.now() - formStartedAt < MIN_FORM_FILL_MS) {
+      return NextResponse.json(
+        { error: "Please review your details and submit again." },
+        { status: 400 },
+      );
+    }
+
     const booking = await createBooking(body);
-    const queue = await fetchQueue(body.booking_date);
+    const queue = await fetchQueue(booking.booking_date);
     const eta_minutes = etaForBooking(queue, booking.id);
 
     return NextResponse.json({
