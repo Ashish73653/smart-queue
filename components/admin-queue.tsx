@@ -78,7 +78,7 @@ export function AdminQueue({ initialBookings, services, today }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-3xl bg-white/90 p-5 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100">
+      <div className="rounded-3xl bg-white/90 p-4 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100 sm:p-5">
         <p className="text-sm font-semibold text-slate-900">Add walk-in</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-4">
           <input
@@ -121,10 +121,10 @@ export function AdminQueue({ initialBookings, services, today }: Props) {
         </div>
       ) : null}
 
-      <div className="space-y-2 rounded-3xl bg-white/90 p-6 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100">
-        <div className="flex items-center justify-between">
+      <div className="space-y-2 rounded-3xl bg-white/90 p-4 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100 sm:p-6">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm font-semibold text-slate-900">Queue</p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-slate-500 sm:text-right">
             Tap a card to control status, delays, or cancellations.
           </p>
         </div>

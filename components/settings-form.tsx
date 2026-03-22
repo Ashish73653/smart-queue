@@ -44,7 +44,7 @@ export function SettingsForm({ initialSettings }: Props) {
   }
 
   return (
-    <div className="space-y-3 rounded-3xl bg-white/90 p-6 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100">
+    <div className="space-y-3 rounded-3xl bg-white/90 p-4 shadow-lg shadow-slate-900/5 ring-1 ring-slate-100 sm:p-6">
       <p className="text-sm font-semibold text-slate-900">Shop settings</p>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-xs text-slate-600">
@@ -126,7 +126,7 @@ export function SettingsForm({ initialSettings }: Props) {
         type="button"
         disabled={loading}
         onClick={save}
-        className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-slate-900/20 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:bg-slate-400"
+        className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-md shadow-slate-900/20 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:bg-slate-400 sm:w-auto"
       >
         {loading ? "Saving..." : "Save settings"}
       </button>
